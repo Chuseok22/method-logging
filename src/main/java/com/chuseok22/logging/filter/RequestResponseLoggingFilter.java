@@ -35,7 +35,7 @@ public class RequestResponseLoggingFilter extends OncePerRequestFilter {
 
   @Override
   protected boolean shouldNotFilter(HttpServletRequest request) {
-    if (!properties.isEnabled()) {
+    if (!properties.isEnabled() || !properties.isHttpFilterEnabled()) {
       return true;
     }
     String path = request.getRequestURI();

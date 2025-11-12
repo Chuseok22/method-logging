@@ -53,7 +53,7 @@ public class MethodExecutionLoggingAspect {
         if (logMonitoring.logResult()) {
           String resultPretty = PrettyJson.toJsonOrToStringMasked(result, 2, properties.isMaskSensitive(), properties.getSensitiveKeys(), properties.getMaskReplacement());
           String truncated = LoggingUtil.truncate(resultPretty, 4000);
-          log.debug("<- {}.{} Result ({} ms):\n {}", className, methodName, duration, truncated.replace("\n", "\n  "));
+          log.info("<- {}.{} Result ({} ms):\n {}", className, methodName, duration, truncated.replace("\n", "\n  "));
         } else if (logMonitoring.logExecutionTime()) {
           log.info("<- {}.{} ({} ms)", className, methodName, duration);
         }

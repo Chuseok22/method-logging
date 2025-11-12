@@ -12,6 +12,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class HttpLoggingProperties {
 
   private boolean enabled = true;
+  private boolean httpFilterEnabled = true;
   private boolean logRequestBody = true;
   private boolean logResponseBody = true;
   private boolean logHeaders = true;
