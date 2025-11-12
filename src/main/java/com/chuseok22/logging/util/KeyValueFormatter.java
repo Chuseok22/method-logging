@@ -55,7 +55,7 @@ public class KeyValueFormatter {
       if (values == null || values.isEmpty()) {
         builder.append("\n");
       } else if (values.size() == 1) {
-        String value = values.getFirst();
+        String value = values.get(0);
         if (maskSensitive && containsIgnoreCase(sensitiveKeys, key)) {
           value = replacement;
         }
