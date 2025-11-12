@@ -33,9 +33,12 @@ public class RequestResponseLoggingFilter extends OncePerRequestFilter {
   private final HttpLoggingProperties properties;
   private final PathMatcher pathMatcher = new AntPathMatcher();
 
+  private static final String HEADER_LINE = "================[HTTP 로깅 시작]================";
+  private static final String FOOTER_LINE = "==============================================";
+
   @Override
   protected boolean shouldNotFilter(HttpServletRequest request) {
-    if (!properties.isEnabled()) {
+    if (!properties.isEnabled() || !properties.isHttpFilterEnabled()) {
       return true;
     }
     String path = request.getRequestURI();
@@ -63,7 +66,10 @@ public class RequestResponseLoggingFilter extends OncePerRequestFilter {
       filterChain.doFilter(cachingRequest, cachingResponse);
     } finally {
       long duration = System.currentTimeMillis() - startTime;
-      logRequestAndResponse(cachingRequest, cachingResponse, duration);
+
+      String logBody = buildHttpLogBody(cachingRequest, cachingResponse, duration);
+
+      log.info("\n{}\n{}\n{}", HEADER_LINE, logBody, FOOTER_LINE);
       cachingResponse.copyBodyToResponse();
     }
   }
@@ -82,7 +88,7 @@ public class RequestResponseLoggingFilter extends OncePerRequestFilter {
     return new ContentCachingResponseWrapper(response);
   }
 
-  private void logRequestAndResponse(ContentCachingRequestWrapper request, ContentCachingResponseWrapper response, long duration) {
+  private String buildHttpLogBody(ContentCachingRequestWrapper request, ContentCachingResponseWrapper response, long duration) {
     String requestId = LoggingUtil.getRequestId(request);
     String method = request.getMethod();
     String uri = request.getRequestURI();
@@ -132,8 +138,7 @@ public class RequestResponseLoggingFilter extends OncePerRequestFilter {
         responseBody
       );
     }
-
-    log.info(logText);
+    return logText;
   }
 
   private Charset resolveCharset(String encoding) {

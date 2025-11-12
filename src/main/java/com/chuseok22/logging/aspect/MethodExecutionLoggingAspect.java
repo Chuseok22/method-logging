@@ -19,6 +19,9 @@ public class MethodExecutionLoggingAspect {
 
   private final HttpLoggingProperties properties;
 
+  private static final String HEADER_LINE = "================[메서드 로깅 시작]================";
+  private static final String FOOTER_LINE = "==============================================";
+
   @Around("@annotation(logMonitoring)")
   public Object logExecution(ProceedingJoinPoint joinPoint, LogMonitoring logMonitoring) throws Throwable {
     MethodSignature signature = (MethodSignature) joinPoint.getSignature();
@@ -28,6 +31,8 @@ public class MethodExecutionLoggingAspect {
     String requestId = MDC.get(properties.getMdcKey());
 
     long startTime = System.currentTimeMillis();
+
+    log.info("\n{}\n", HEADER_LINE);
 
     if (logMonitoring.logParameters()) {
       String argsPretty = PrettyJson.toJsonOrToStringMasked(joinPoint.getArgs(), 2, properties.isMaskSensitive(), properties.getSensitiveKeys(), properties.getMaskReplacement());
@@ -53,13 +58,15 @@ public class MethodExecutionLoggingAspect {
         if (logMonitoring.logResult()) {
           String resultPretty = PrettyJson.toJsonOrToStringMasked(result, 2, properties.isMaskSensitive(), properties.getSensitiveKeys(), properties.getMaskReplacement());
           String truncated = LoggingUtil.truncate(resultPretty, 4000);
-          log.debug("<- {}.{} Result ({} ms):\n {}", className, methodName, duration, truncated.replace("\n", "\n  "));
+          log.info("<- {}.{} Result ({} ms):\n {}", className, methodName, duration, truncated.replace("\n", "\n  "));
         } else if (logMonitoring.logExecutionTime()) {
           log.info("<- {}.{} ({} ms)", className, methodName, duration);
         }
       } else {
         log.error("x {}.{} Error ({} ms): {}", className, methodName, duration, throwable.getMessage(), throwable);
       }
+
+      log.info("\n{}", FOOTER_LINE);
     }
   }
 
