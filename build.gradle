@@ -1,0 +1,76 @@
+plugins {
+    id 'java-library'
+    id 'org.springframework.boot' version '3.5.7'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'maven-publish'
+}
+
+group = 'com.chuseok22'
+version = project.findProperty('version') ?: '0.0.0-SNAPSHOT'
+description = 'method-logging'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+bootJar {
+    enabled = false
+}
+
+jar {
+    enabled = true
+}
+
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-aop'
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+            pom {
+                name = 'Chuseok22 Method Logging'
+                description = 'Spring Boot 메서드 로깅'
+                url = 'https://github.com/Chuseok22/method-logging'
+            }
+        }
+    }
+    repositories {
+        mavenLocal()
+        maven {
+            name = 'chuseok22Nexus'
+            url = uri(
+                    version.endsWith('SNAPSHOT')
+                            ? "https://nexus.chuseok22.com/repository/maven-snapshots/"
+                            : "https://nexus.chuseok22.com/repository/maven-releases/"
+            )
+            allowInsecureProtocol = true
+            credentials {
+                username = project.findProperty('nexusUsername')
+                password = project.findProperty('nexusPassword')
+            }
+        }
+    }
+}
