@@ -3,6 +3,7 @@ package com.chuseok22.logging.util;
 import java.net.URLDecoder;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,70 +29,65 @@ public class KeyValueFormatter {
         key = URLDecoder.decode(part, charset);
         value = "";
       }
-      List<String> list = map.get(key);
-      if (list == null) {
-        list = new ArrayList<>();
-        map.put(key, list);
-      }
-      list.add(value);
+      map.computeIfAbsent(key, k -> new ArrayList<>()).add(value);
     }
     return map;
   }
 
-  public Map<String, List<String>> parseFormUrlEncoded(String body, Charset charset) {
-    return parseQuery(body, charset);
+  public Map<String, List<String>> fromParamMap(Map<String, String[]> paramMap) {
+    Map<String, List<String>> map = new LinkedHashMap<>();
+    if (paramMap == null) {
+      return map;
+    }
+    for (Map.Entry<String, String[]> e : paramMap.entrySet()) {
+      map.put(e.getKey(), e.getValue() == null ? List.of() : Arrays.asList(e.getValue()));
+    }
+    return map;
   }
 
-  public String formatBlockMasked(Map<String, List<String>> map, int indentSize, boolean maskSensitive, List<String> sensitiveKeys, String replacement) {
-    String indent = buildIndent(indentSize);
+  public String formatBlockMasked(Map<String, List<String>> map,
+    int indentSize,
+    boolean maskSensitive,
+    List<String> sensitiveKeys,
+    String replacement) {
+    String indent = " ".repeat(Math.max(0, indentSize));
     if (map == null || map.isEmpty()) {
       return "(empty)\n";
     }
-    StringBuilder builder = new StringBuilder();
-    for (Map.Entry<String, List<String>> entry : map.entrySet()) {
-      String key = entry.getKey();
-      List<String> values = entry.getValue();
-      builder.append(indent).append("- ").append(key).append(": ");
+
+    StringBuilder b = new StringBuilder();
+    for (Map.Entry<String, List<String>> e : map.entrySet()) {
+      String key = e.getKey();
+      List<String> values = e.getValue();
+      b.append(indent).append("- ").append(key).append(": ");
       if (values == null || values.isEmpty()) {
-        builder.append("\n");
+        b.append("\n");
       } else if (values.size() == 1) {
-        String value = values.get(0);
+        String v = values.get(0);
         if (maskSensitive && containsIgnoreCase(sensitiveKeys, key)) {
-          value = replacement;
+          v = replacement;
         }
-        builder.append(value).append("\n");
+        b.append(v).append("\n");
       } else {
         List<String> masked = new ArrayList<>();
-        for (String value : values) {
-          if (maskSensitive && containsIgnoreCase(sensitiveKeys, key)) {
-            masked.add(replacement);
-          } else {
-            masked.add(value);
-          }
+        for (String v : values) {
+          masked.add(maskSensitive && containsIgnoreCase(sensitiveKeys, key) ? replacement : v);
         }
-        builder.append(masked).append("\n");
+        b.append(masked).append("\n");
       }
     }
-    return builder.toString();
+    return b.toString();
   }
 
-  private static boolean containsIgnoreCase(List<String> keys, String name) {
+  private boolean containsIgnoreCase(List<String> keys, String name) {
     if (keys == null || name == null) {
       return false;
     }
-    for (String key : keys) {
-      if (key != null && key.equalsIgnoreCase(name)) {
+    for (String k : keys) {
+      if (k != null && k.equalsIgnoreCase(name)) {
         return true;
       }
     }
     return false;
-  }
-
-  private String buildIndent(int size) {
-    StringBuilder builder = new StringBuilder();
-    for (int i = 0; i < size; i++) {
-      builder.append(' ');
-    }
-    return builder.toString();
   }
 }

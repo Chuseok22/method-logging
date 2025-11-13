@@ -11,20 +11,24 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "chuseok22.logging")
 public class HttpLoggingProperties {
 
+  // 라이브러리 전체 on/off
   private boolean enabled = true;
-  private boolean httpFilterEnabled = true;
+
+  // 요청 헤더 출력 여부
+  private boolean logRequestHeaders = true;
+  // 요청 바디 출력 여부
   private boolean logRequestBody = true;
+
+  // 응답 헤더 출력 여부
+  private boolean logResponseHeaders = true;
+  // 응답 바디 출력 여부
   private boolean logResponseBody = true;
-  private boolean logHeaders = true;
+
   private int maxBodyLength = 2000;
-  private List<String> excludedPaths = new ArrayList<String>();
+
   private String correlationHeaderName = "X-Request-Id";
   private String mdcKey = "requestId";
-  private boolean multiline = true; // 멀티라인
-  private boolean prettyJson = true; // JSON pretty
-  private int indentSize = 2; // 들여쓰기 크기
-  private boolean prettyQueryParams = true; // 쿼리 파라미터 키=값 블록
-  private boolean prettyFormBody = true; // form-urlencoded 바디 키=값 블록
+
   private boolean maskSensitive = true; // 민감 키 마스킹
   private List<String> sensitiveKeys = new ArrayList<String>(); // 민감 키 ex) password, authorization
   private String maskReplacement = "****";
