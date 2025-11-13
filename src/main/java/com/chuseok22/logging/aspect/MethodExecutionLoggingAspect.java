@@ -8,12 +8,12 @@ import com.chuseok22.logging.util.PrettyJson;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.lang.annotation.Annotation;
+import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.LinkedHashMap;
@@ -166,7 +166,7 @@ public class MethodExecutionLoggingAspect {
       result = joinPoint.proceed();
       return result;
     } catch (Throwable ex) {
-      thrown = ex;                     // [CHANGED] 예외 저장
+      thrown = ex;
       throw ex;
     } finally {
       long took = System.currentTimeMillis() - start;
@@ -191,37 +191,30 @@ public class MethodExecutionLoggingAspect {
             .append(" (").append(took).append(" ms)\n");
         }
       } else {
-        // [CHANGED] 에러여도 동일 박스 내에 "Response(ERROR)" 형태로 출력
-        Map<String, Object> errorPrintable = new LinkedHashMap<>();
-        errorPrintable.put("_type", "Error");
-        errorPrintable.put("exception", thrown.getClass().getName());
-        errorPrintable.put("message", thrown.getMessage());
-
+        // === 간단 에러 출력: Exception / Status / (가능하면) Body ===
         Integer status = resolveStatus(thrown);
-        if (status != null) {
-          errorPrintable.put("status", status);
-        }
-
-        // 현재 시점의 응답 헤더도 가능하면 덧붙임
-        if (properties.isLogResponseHeaders() && response != null) {
-          errorPrintable.put("headers", safeHeaders(response));
-        }
-
-        // 스택트레이스 Top N (5)
-        errorPrintable.put("stacktraceTop", topFrames(thrown, 5));
-
-        String pretty = PrettyJson.toJsonOrToStringMasked(
-          errorPrintable,
-          properties.isMaskSensitive(),
-          properties.getSensitiveKeys(),
-          properties.getMaskReplacement()
-        );
-        pretty = LoggingUtil.truncate(pretty, properties.getMaxBodyLength());
+        Object errorBody = extractErrorBody(thrown); // 베스트에포트
 
         b.append("<- ").append(className).append(".").append(methodName)
-          .append(" Response(ERROR) (").append(took).append(" ms):\n  ")
-          .append(pretty.replace("\n", "\n  "))
-          .append("\n");
+          .append(" ERROR (").append(took).append(" ms):\n")
+          .append("  Exception: ").append(thrown.getClass().getName()).append("\n");
+
+        if (status != null) {
+          b.append("  Status: ").append(status).append("\n");
+        }
+
+        if (errorBody != null) {
+          String pretty = PrettyJson.toJsonOrToStringMasked(
+            errorBody,
+            properties.isMaskSensitive(),
+            properties.getSensitiveKeys(),
+            properties.getMaskReplacement()
+          );
+          pretty = LoggingUtil.truncate(pretty, properties.getMaxBodyLength());
+          b.append("  Body:\n  ").append(pretty.replace("\n", "\n  ")).append("\n");
+        } else {
+          b.append("  Body: (omitted or handled by global exception handler)\n");
+        }
       }
 
       b.append("\n").append(FOOTER_LINE).append("\n");
@@ -280,7 +273,6 @@ public class MethodExecutionLoggingAspect {
       printable.put("body", properties.isLogResponseBody() ? re.getBody() : "[omitted]");
       return printable;
     }
-    // 일반 객체 반환
     if (!properties.isLogResponseBody()) {
       return "[omitted]";
     }
@@ -299,23 +291,6 @@ public class MethodExecutionLoggingAspect {
     return h;
   }
 
-  // [CHANGED] HttpServletResponse 헤더도 마스킹 포함해 맵으로 변환
-  private Map<String, List<String>> safeHeaders(HttpServletResponse resp) {
-    Map<String, List<String>> h = new LinkedHashMap<>();
-    if (resp == null) {
-      return h;
-    }
-    for (String name : resp.getHeaderNames()) {
-      Collection<String> values = resp.getHeaders(name);
-      if (properties.isMaskSensitive() && containsIgnoreCase(properties.getSensitiveKeys(), name)) {
-        h.put(name, List.of(properties.getMaskReplacement()));
-      } else {
-        h.put(name, new ArrayList<>(values));
-      }
-    }
-    return h;
-  }
-
   private Object sanitizeArgs(Object[] args) {
     if (args == null) {
       return null;
@@ -323,32 +298,51 @@ public class MethodExecutionLoggingAspect {
     return Arrays.asList(args);
   }
 
-  // [CHANGED] 예외에서 HTTP Status 추정 (ResponseStatusException 또는 @ResponseStatus)
   private Integer resolveStatus(Throwable t) {
     if (t instanceof ResponseStatusException rse) {
       try {
         return rse.getStatusCode().value();
-      } catch (Throwable ignore) { /* no-op */ }
+      } catch (Throwable ignore) {
+      }
     }
     ResponseStatus rs = t.getClass().getAnnotation(ResponseStatus.class);
     if (rs != null) {
       try {
         HttpStatus code = rs.code() != HttpStatus.INTERNAL_SERVER_ERROR ? rs.code() : rs.value();
         return code.value();
-      } catch (Throwable ignore) { /* no-op */ }
+      } catch (Throwable ignore) {
+      }
     }
     return null;
   }
 
-  private List<String> topFrames(Throwable t, int limit) {
-    List<String> frames = new ArrayList<>();
-    if (t == null) {
-      return frames;
+  // 예외에서 “응답 바디로 쓸 만한 것”을 최대한 추출 (없으면 null)
+  private Object extractErrorBody(Throwable t) {
+    // 1) ResponseStatusException: reason 사용
+    if (t instanceof ResponseStatusException rse) {
+      String reason = rse.getReason();
+      if (reason != null) {
+        return Map.of("reason", reason);
+      }
     }
-    StackTraceElement[] st = t.getStackTrace();
-    for (int i = 0; i < Math.min(limit, st.length); i++) {
-      frames.add(st[i].toString());
+
+    // 2) 흔한 커스텀 예외 패턴: getBody(), getPayload(), getErrorResponse(), toResponseEntity()
+    List<String> candidates = List.of("getBody", "getPayload", "getErrorResponse", "getResponse", "toResponseEntity");
+    for (String name : candidates) {
+      try {
+        Method m = t.getClass().getMethod(name);
+        Object o = m.invoke(t);
+        if (o instanceof ResponseEntity<?> re) {
+          return re.getBody();
+        }
+        if (o != null) {
+          return o; // 맵/DTO 등
+        }
+      } catch (Throwable ignore) { /* 메서드 없음 or 실패 */ }
     }
-    return frames;
+
+    // 3) 마지막으로 메시지만 노출
+    String msg = t.getMessage();
+    return (msg != null && !msg.isBlank()) ? Map.of("message", msg) : null;
   }
 }
