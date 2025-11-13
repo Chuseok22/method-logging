@@ -13,6 +13,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.LinkedHashMap;
@@ -27,10 +28,13 @@ import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.slf4j.MDC;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
+import org.springframework.web.server.ResponseStatusException;
 
 @Aspect
 @Slf4j
@@ -74,7 +78,7 @@ public class MethodExecutionLoggingAspect {
     StringBuilder b = new StringBuilder();
     b.append("\n\n").append(HEADER_LINE).append("\n\n");
 
-    // ======================= HTTP REQUEST =======================
+    // =============== HTTP REQUEST ===============
     if (request != null) {
       String method = request.getMethod();
       String uri = request.getRequestURI();
@@ -85,7 +89,6 @@ public class MethodExecutionLoggingAspect {
       b.append("[HTTP REQUEST] [RequestId: ").append(requestId).append("]\n");
       b.append("-> ").append(method).append(" ").append(uri).append("\n");
 
-      // [CHANGED] 요청 헤더 출력 여부
       if (properties.isLogRequestHeaders()) {
         b.append("  Headers:\n");
         Enumeration<String> names = request.getHeaderNames();
@@ -100,13 +103,12 @@ public class MethodExecutionLoggingAspect {
         }
       }
 
-      // Query
       Map<String, List<String>> qp = KeyValueFormatter.parseQuery(queryString, cs);
       b.append("  Query:\n").append(KeyValueFormatter.formatBlockMasked(
         qp, 2, properties.isMaskSensitive(), properties.getSensitiveKeys(), properties.getMaskReplacement()
       ));
 
-      // Body (@RequestBody 기반)
+      // @RequestBody 기반 바디 출력
       if (properties.isLogRequestBody()) {
         if (LoggingUtil.isJson(contentType)) {
           List<Object> bodies = extractRequestBodyArgs(signature, joinPoint.getArgs());
@@ -144,7 +146,7 @@ public class MethodExecutionLoggingAspect {
       b.append("\n");
     }
 
-    // ======================= METHOD ARGS =======================
+    // =============== METHOD ARGS ===============
     if (logMonitoring.logParameters()) {
       String argsJson = PrettyJson.toJsonOrToStringMasked(
         sanitizeArgs(joinPoint.getArgs()),
@@ -159,19 +161,20 @@ public class MethodExecutionLoggingAspect {
 
     Object result = null;
     Throwable thrown = null;
+
     try {
       result = joinPoint.proceed();
       return result;
     } catch (Throwable ex) {
-      thrown = ex;
+      thrown = ex;                     // [CHANGED] 예외 저장
       throw ex;
     } finally {
       long took = System.currentTimeMillis() - start;
 
-      // ======================= RESPONSE / RESULT =======================
+      // =============== RESPONSE / RESULT ===============
       if (thrown == null) {
         if (logMonitoring.logResult()) {
-          Object printable = unwrapResponse(result); // [CHANGED] 응답 헤더/바디 정책 반영
+          Object printable = unwrapResponse(result);
           String pretty = PrettyJson.toJsonOrToStringMasked(
             printable,
             properties.isMaskSensitive(),
@@ -188,8 +191,37 @@ public class MethodExecutionLoggingAspect {
             .append(" (").append(took).append(" ms)\n");
         }
       } else {
-        b.append("[ERROR] ").append(className).append(".").append(methodName)
-          .append(" (").append(took).append(" ms): ").append(thrown.getMessage()).append("\n");
+        // [CHANGED] 에러여도 동일 박스 내에 "Response(ERROR)" 형태로 출력
+        Map<String, Object> errorPrintable = new LinkedHashMap<>();
+        errorPrintable.put("_type", "Error");
+        errorPrintable.put("exception", thrown.getClass().getName());
+        errorPrintable.put("message", thrown.getMessage());
+
+        Integer status = resolveStatus(thrown);
+        if (status != null) {
+          errorPrintable.put("status", status);
+        }
+
+        // 현재 시점의 응답 헤더도 가능하면 덧붙임
+        if (properties.isLogResponseHeaders() && response != null) {
+          errorPrintable.put("headers", safeHeaders(response));
+        }
+
+        // 스택트레이스 Top N (5)
+        errorPrintable.put("stacktraceTop", topFrames(thrown, 5));
+
+        String pretty = PrettyJson.toJsonOrToStringMasked(
+          errorPrintable,
+          properties.isMaskSensitive(),
+          properties.getSensitiveKeys(),
+          properties.getMaskReplacement()
+        );
+        pretty = LoggingUtil.truncate(pretty, properties.getMaxBodyLength());
+
+        b.append("<- ").append(className).append(".").append(methodName)
+          .append(" Response(ERROR) (").append(took).append(" ms):\n  ")
+          .append(pretty.replace("\n", "\n  "))
+          .append("\n");
       }
 
       b.append("\n").append(FOOTER_LINE).append("\n");
@@ -238,20 +270,14 @@ public class MethodExecutionLoggingAspect {
 
   private Object unwrapResponse(Object result) {
     if (result instanceof ResponseEntity<?> re) {
-      // 상태/헤더/바디를 JSON 구조로 표현.
       Map<String, Object> printable = new LinkedHashMap<>();
       printable.put("_type", "ResponseEntity");
       printable.put("status", re.getStatusCode().value());
 
-      if (properties.isLogResponseHeaders()) { // [CHANGED] 응답 헤더 출력 제어
+      if (properties.isLogResponseHeaders()) {
         printable.put("headers", safeHeaders(re.getHeaders()));
       }
-
-      if (properties.isLogResponseBody()) {    // [CHANGED] 응답 바디 출력 제어
-        printable.put("body", re.getBody());
-      } else {
-        printable.put("body", "[omitted]");
-      }
+      printable.put("body", properties.isLogResponseBody() ? re.getBody() : "[omitted]");
       return printable;
     }
     // 일반 객체 반환
@@ -273,10 +299,56 @@ public class MethodExecutionLoggingAspect {
     return h;
   }
 
+  // [CHANGED] HttpServletResponse 헤더도 마스킹 포함해 맵으로 변환
+  private Map<String, List<String>> safeHeaders(HttpServletResponse resp) {
+    Map<String, List<String>> h = new LinkedHashMap<>();
+    if (resp == null) {
+      return h;
+    }
+    for (String name : resp.getHeaderNames()) {
+      Collection<String> values = resp.getHeaders(name);
+      if (properties.isMaskSensitive() && containsIgnoreCase(properties.getSensitiveKeys(), name)) {
+        h.put(name, List.of(properties.getMaskReplacement()));
+      } else {
+        h.put(name, new ArrayList<>(values));
+      }
+    }
+    return h;
+  }
+
   private Object sanitizeArgs(Object[] args) {
     if (args == null) {
       return null;
     }
     return Arrays.asList(args);
+  }
+
+  // [CHANGED] 예외에서 HTTP Status 추정 (ResponseStatusException 또는 @ResponseStatus)
+  private Integer resolveStatus(Throwable t) {
+    if (t instanceof ResponseStatusException rse) {
+      try {
+        return rse.getStatusCode().value();
+      } catch (Throwable ignore) { /* no-op */ }
+    }
+    ResponseStatus rs = t.getClass().getAnnotation(ResponseStatus.class);
+    if (rs != null) {
+      try {
+        HttpStatus code = rs.code() != HttpStatus.INTERNAL_SERVER_ERROR ? rs.code() : rs.value();
+        return code.value();
+      } catch (Throwable ignore) { /* no-op */ }
+    }
+    return null;
+  }
+
+  private List<String> topFrames(Throwable t, int limit) {
+    List<String> frames = new ArrayList<>();
+    if (t == null) {
+      return frames;
+    }
+    StackTraceElement[] st = t.getStackTrace();
+    for (int i = 0; i < Math.min(limit, st.length); i++) {
+      frames.add(st[i].toString());
+    }
+    return frames;
   }
 }
