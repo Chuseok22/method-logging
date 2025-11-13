@@ -1,275 +1,249 @@
-# chuseok22-logging (Servlet HTTP & Method Logger)
+# Chuseok22 Method Logging (Spring Boot)
 
-스프링 부트(서블릿 MVC)에서 **HTTP 요청/응답**과 **메서드 호출(파라미터·반환값·실행시간)**을
-한눈에 보기 좋게 로깅하는 경량 라이브러리입니다.  
-JSON은 프리티 프린트/마스킹, `application/x-www-form-urlencoded`는 키=값 블록으로 예쁘게 정리하며,
-멀티파트/바이너리는 자동으로 생략합니다.
-
-> 요구사항: **Java 21**, **Spring Boot 3.x (Servlet)**  
-> 비대상: Spring WebFlux(리액티브)는 본 라이브러리의 필터/캐싱 방식과 호환되지 않습니다.
+HTTP 요청/응답 + 메서드 실행 정보를 **한 번에 보기 좋게** 로깅하는 경량 라이브러리입니다.  
+`@LogMonitoring`가 붙은 메서드에서만 동작하며, 개발자가 콘솔 로그만 보고도 **무슨 요청이 들어왔고, 어떤 인자가 전달되었으며, 무엇이 응답(또는 오류)** 되었는지 빠르게 파악할 수 있도록 도와줍니다.
 
 ---
 
-## ✨ 주요 기능
+## 주요 특징
 
-- **HTTP 인/아웃 로깅**
-  - 메서드, URL, 쿼리 파라미터(블록 표기), 헤더(옵션), 바디(옵션), 상태코드, 소요시간
-  - JSON **프리티 출력**(+ 민감키 **마스킹**) / `application/x-www-form-urlencoded`는 **키=값 블록**
-  - **멀티파트·바이너리 자동 미출력** (업로드/다운로드 안전)
-  - **RequestId(MDC)** 헤더 자동 주입 (`X-Request-Id` 기본값)
+- **어노테이션 기반 동작**: `@LogMonitoring`가 붙은 메서드에서만 로깅
+- **HTTP 요청 섹션**: 메서드/URL, 헤더(마스킹 적용), 쿼리 파라미터, 요청 바디(JSON/Form/Multi-part 구분)
+- **메서드 인자 섹션**: 실제 메서드로 전달된 인자들을 보기 좋게(JSON Pretty) 출력
+- **응답/오류 섹션**: 정상 응답 또는 예외 요약(예외 클래스/상태코드/간단 바디) 출력
+- **가독성 높은 박스 레이아웃**: 시작/끝 라인을 고정 포맷으로 출력해 로그 검색/구분이 쉬움
+- **민감정보 마스킹**: Authorization, password 등 키워드 기반 값 마스킹
+- **MDC 연동**: `requestId`를 자동 주입해 트레이싱에 유리
 
-- **메서드 레벨 로깅**
-  - `@LogMonitoring`로 메서드 **파라미터/결과/실행시간** 로깅
-  - 결과/인자에도 JSON 프리티 + 민감키 마스킹 적용
-
-- **운영 친화적인 설정**
-  - **경로 제외 패턴**(Ant 스타일) / **본문 길이 제한** / **헤더 로깅 on/off**
-  - **원라인/멀티라인** 로그 모드
-  - **민감키 마스킹**(헤더/바디/쿼리/폼/메서드 인자·반환값)
+> 참고: HTTP 섹션은 웹 요청 컨텍스트에서만 출력됩니다. 스케줄러/비동기 등 **웹 요청이 아닌 실행**에서는 HTTP 섹션이 생략되고, **메서드 인자/응답(또는 오류)** 섹션만 출력됩니다.
 
 ---
 
-## 🔧 설치 (소비 프로젝트)
+## 호환성
 
-### 1) Nexus 저장소 등록
+- **JDK 17+** 권장
+- Spring Boot 3.x (AOP 사용)
+- Gradle(Groovy) 기반 예시 제공
+
+---
+
+## 빠른 시작 (Quick Start)
+
+### 1) 의존성 추가
+
+> **사설 Nexus** 저장소를 사용합니다. (예시는 릴리즈 리포지토리 기준)
+
+**`build.gradle` (루트 or 서브프로젝트)**
 
 ```groovy
 repositories {
+    mavenCentral()
     maven {
-        url "https://nexus.chuseok22.com/repository/maven-releases/"
-    }
-    maven {
-        url "https://nexus.chuseok22.com/repository/maven-snapshots/"
+        url = uri("https://nexus.chuseok22.com/repository/maven-releases/")
+        allowInsecureProtocol = true
     }
 }
-```
 
-### 2) 의존성 추가
-
-```groovy
 dependencies {
-    implementation "com.chuseok22:method-logging:<버전>"
-    // 예: implementation "com.chuseok22:method-logging:0.1.0"
+    implementation "com.chuseok22:logging:0.0.1"
+    implementation "org.springframework.boot:spring-boot-starter-aop"
 }
 ```
 
-> 스냅샷을 쓰려면 `-SNAPSHOT` 버전을 사용하세요.
+### 2) 기본 설정
 
----
-
-## ⚙️ 설정 (application.yml)
-
-기본 prefix: **`chuseok22.logging`**
+**`src/main/resources/application.yml`**
 
 ```yaml
 chuseok22:
   logging:
-    enabled: true                 # 전역 on/off
-    multiline: true               # true: 멀티라인, false: 원라인
-    pretty-json: true             # JSON 프리티 프린트
-    indent-size: 2                # 프리티 들여쓰기 공백수
-    log-headers: true             # 요청/응답 헤더 로깅
-    log-request-body: true        # 요청 바디 로깅
-    log-response-body: true       # 응답 바디 로깅
-    pretty-query-params: true     # 쿼리 키=값 블록 표기
-    pretty-form-body: true        # form 바디 키=값 블록 + 원문 억제
-    max-body-length: 4000         # 바디 최대 길이(초과분은 …truncated)
-    mask-sensitive: true          # 민감키 마스킹(헤더/바디/쿼리/폼/메서드)
-    sensitive-keys:               # 대소문자 무시 매칭
+    enabled: true                       # 라이브러리 전체 on/off
+    log-request-headers: true           # 요청 헤더 출력 여부
+    log-request-body: true              # 요청 바디 출력 여부
+    log-response-headers: true          # 응답 헤더 출력 여부
+    log-response-body: true             # 응답 바디 출력 여부
+    max-body-length: 2000               # 바디 출력 길이 제한(초과 시 잘라서 출력)
+    correlation-header-name: X-Request-Id
+    mdc-key: requestId
+    mask-sensitive: true                # 민감 키 값 마스킹
+    sensitive-keys:                     # (대소문자 무시) 키 이름이 일치하면 값 마스킹
       - authorization
       - cookie
       - set-cookie
       - password
-      - accessToken
-      - refreshToken
-      - secret
-    mask-replacement: "****"      # 마스킹 대체문자
-    excluded-paths:               # 로깅 제외 경로(Ant 패턴)
-      - /actuator/health
-      - /actuator/prometheus
-    correlation-header-name: X-Request-Id # 상호연관 헤더명
-    mdc-key: requestId                      # MDC 보관 키
+      - access-token
+      - refresh-token
+      - x-api-key
+    mask-replacement: "****"
 ```
 
-### 로깅 레벨 권장값
+### 3) 어노테이션 달고 사용
 
-```yaml
-logging:
-  level:
-    com.chuseok22.logging.filter: INFO
-    com.chuseok22.logging.aspect: DEBUG
-```
-
----
-
-## 🧩 사용 방법
-
-### 1) HTTP 요청/응답 자동 로깅
-
-`OncePerRequestFilter` 기반의 필터가 자동으로 아래를 로깅합니다.
-
-- 요청: 메서드/URL/쿼리/헤더(옵션)/바디(옵션)
-- 응답: 상태코드/소요시간/헤더(옵션)/바디(옵션)
-- `multipart/*` 또는 바이너리 바디는 자동 생략
-
-> **쿼리·폼 바디**는 키=값 블록으로 가독성 좋게 출력됩니다.  
-> **JSON 바디**는 프리티 프린트 + 민감키 마스킹 후 출력됩니다.
-
-### 2) 메서드 실행 로깅 (@LogMonitoring)
+**컨트롤러/서비스 메서드에 `@LogMonitoring` 추가**
 
 ```java
 import com.chuseok22.logging.annotation.LogMonitoring;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
 
-@LogMonitoring                       // 클래스에 부여하면 모든 public 메서드 적용
-public class UserService {
+@RestController
+@RequestMapping("/api/member")
+public class MemberController {
 
-  @LogMonitoring(logParameters = true, logResult = true, logExecutionTime = true)
-  public UserDto findUser(UserQuery query) {
-      ...
-  }
+    @LogMonitoring
+    @PostMapping("/withdraw")
+    public ResponseEntity<Void> withdraw(@RequestBody WithdrawRequest request) {
+        // ... 중략 ...
+        return ResponseEntity.ok().build();
+    }
 }
 ```
 
-- `logParameters`: 메서드 인자 로깅 (JSON 프리티/마스킹 적용)
-- `logResult`    : 반환값 로깅 (JSON 프리티/마스킹 적용)
-- `logExecutionTime`: 실행시간(ms) 로깅
-
-> 예외 발생 시 스택트레이스와 함께 `ERROR` 레벨로 출력합니다.
+> `@LogMonitoring(logParameters = true, logResult = true, logExecutionTime = true)`  
+> 세 속성은 각각 “메서드 인자 출력 / 결과 출력 / 실행시간 출력” 여부를 제어합니다.  
+> (기본값: 모두 `true`)
 
 ---
 
-## 🧪 출력 예시
+## 출력 예시
 
-### 1) HTTP (멀티라인 모드)
+### 1) 정상 요청/응답
 
 ```
-[HTTP] [RequestId: 7c1f5f2ef3a24b89b8d43a]
--> Request: POST /api/login
-  Headers-Request:
-    - content-type: application/x-www-form-urlencoded
-    - authorization: ****
+==========================[메서드 로깅 시작]==========================
+
+[HTTP REQUEST] [RequestId: 0a1ef4bd92e842e9ac0bc8489fe8389c]
+-> POST /api/member/withdraw
+  Headers:
+  - host: localhost:8080
+  - authorization: ****
+  - content-type: application/json;charset=UTF-8
+  - accept: application/json;charset=UTF-8
   Query:
   (empty)
-  Form:
-    - username: alice
-    - password: ****
-  Body: (suppressed, see Form)
-<- Response: 200 (18 ms)
-  Headers-Response:
-    - content-type: application/json
-    - set-cookie: ****
   Body:
   {
-    "token" : "****",
-    "expiresIn" : 3600
+    "withdrawalReasonType" : "NO_CONCERTS",
+    "otherReason" : "string"
   }
-```
 
-### 2) 메서드 (@LogMonitoring)
-
-```
-[METHOD] [RequestId: 7c1f5f2ef3a24b89b8d43a]
--> AuthService.login Args:
+[METHOD] MemberController.withdraw Args:
   [
     {
-      "username" : "alice",
-      "password" : "****"
+      "withdrawalReasonType" : "NO_CONCERTS",
+      "otherReason" : "string"
     }
   ]
-<- AuthService.login Result (12 ms):
+
+<- MemberController.withdraw Result (18 ms):
   {
-    "token" : "****",
-    "expiresIn" : 3600
+    "_type" : "ResponseEntity",
+    "status" : 200,
+    "headers" : { },
+    "body" : null
   }
+
+==================================================================
 ```
 
-### 3) 원라인 모드 예시
+### 2) 예외 발생(간략 출력)
 
 ```
-[HTTP] [RequestId: 5a8c...] POST /api/users?active=true => Status=200, DurationMs=7
+==========================[메서드 로깅 시작]==========================
+
+[HTTP REQUEST] [RequestId: 694a71ef50a64c9aa2a1b24b4c9951b2]
+-> POST /mock/login
+  Headers:
+  - authorization: ****
+  - content-type: multipart/form-data; boundary=----WebKitFormBoundary...
+  Query:
+  (empty)
+  Body: [multipart] (files/parts omitted)
+
+[METHOD] MockController.socialLogin Args:
+  [
+    {
+      "username" : "string@naver.com",
+      "role" : "ROLE_ADMIN",
+      "socialPlatform" : "NORMAL"
+    }
+  ]
+
+<- MockController.socialLogin ERROR (7 ms):
+  Exception: com.ticketmate.backend.common.application.exception.CustomException
+  Status: 400
+  Body:
+  {
+    "message" : "잘못된 회원 권한 요청입니다."
+  }
+
+==================================================================
 ```
 
----
-
-## 🛡️ 보안/성능 가이드
-
-- **민감 데이터**: `mask-sensitive`를 **true**로 두고 `sensitive-keys`를 서비스 규칙에 맞게 보강하세요.
-  - 대상: 헤더/쿼리/폼/JSON 바디/메서드 인자·반환값
-- **바디 크기 제한**: `max-body-length`를 환경에 맞게 조정(운영 축소 권장).
-- **대용량/스트리밍 응답**: `ContentCachingResponseWrapper` 특성상 완전 캐싱이 필요합니다.
-  - SSE/NDJSON 등 스트리밍은 로깅을 끄거나 **excluded-paths**로 제외하는 것을 권장.
-- **멀티파트/바이너리**: 자동 미출력. 파일 내용은 로그에 남지 않습니다.
-- **운영 레벨**: HTTP 로그는 `INFO`, 메서드 로그는 `DEBUG` 권장(노이즈 제어).
+> 오류 시에는 **예외 클래스 이름, 상태코드(가능할 때), 간단한 바디/메시지**만 출력됩니다.  
+> 글로벌 예외 처리기가 별도 응답을 만든 경우에도, 가능한 범위에서 간략 바디를 베스트에포트로 출력합니다.
 
 ---
 
-## 🧷 경로 제외(필터 무시)
+## 구성 옵션(요약표)
 
-`excluded-paths`에 Ant 패턴으로 등록하면 로깅을 완전히 건너뜁니다.
+| 프로퍼티 | 타입 | 기본값 | 설명 |
+|---|---|---:|---|
+| `chuseok22.logging.enabled` | boolean | `true` | 라이브러리 전체 On/Off |
+| `chuseok22.logging.log-request-headers` | boolean | `true` | 요청 헤더 출력 |
+| `chuseok22.logging.log-request-body` | boolean | `true` | 요청 바디 출력(JSON/Form/Multi-part 구분) |
+| `chuseok22.logging.log-response-headers` | boolean | `true` | 응답 헤더 출력 |
+| `chuseok22.logging.log-response-body` | boolean | `true` | 응답 바디 출력 |
+| `chuseok22.logging.max-body-length` | int | `2000` | 바디 출력 길이 제한(초과 시 생략 표시) |
+| `chuseok22.logging.correlation-header-name` | string | `X-Request-Id` | 응답 헤더로도 반환되는 상관관계 ID 헤더명 |
+| `chuseok22.logging.mdc-key` | string | `requestId` | MDC 키 이름 |
+| `chuseok22.logging.mask-sensitive` | boolean | `true` | 민감 키 값 마스킹 사용 여부 |
+| `chuseok22.logging.sensitive-keys` | list | `[]` | 마스킹 대상 키 목록(대소문자 무시) |
+| `chuseok22.logging.mask-replacement` | string | `****` | 마스킹 대체 문자열 |
 
-```yaml
-excluded-paths:
-  - /health
-  - /actuator/**
-  - /static/**
-```
-
----
-
-## 🧰 커스터마이징 체크리스트
-
-| 키 | 타입 | 기본값 | 설명 |
-|---|---|---|---|
-| `enabled` | boolean | `true` | 라이브러리 전역 on/off |
-| `multiline` | boolean | `true` | 로그를 멀티라인 블록으로 출력 |
-| `pretty-json` | boolean | `true` | JSON 프리티 프린트 |
-| `indent-size` | int | `2` | 프리티 들여쓰기 공백 수 |
-| `log-headers` | boolean | `true` | 요청/응답 헤더 출력 |
-| `log-request-body` | boolean | `true` | 요청 바디 출력 |
-| `log-response-body` | boolean | `true` | 응답 바디 출력 |
-| `pretty-query-params` | boolean | `true` | 쿼리 키=값 블록 |
-| `pretty-form-body` | boolean | `true` | form 바디 블록 + 원문 억제 |
-| `max-body-length` | int | `2000` | 바디 길이 상한(초과 시 `...(truncated)`) |
-| `mask-sensitive` | boolean | `true` | 민감키 마스킹 활성화 |
-| `sensitive-keys` | list | `[]` | 마스킹 대상 키 목록(대소문자 무시) |
-| `mask-replacement` | string | `"****"` | 마스킹 치환 문자열 |
-| `excluded-paths` | list | `[]` | 로깅 제외 경로(Ant 패턴) |
-| `correlation-header-name` | string | `"X-Request-Id"` | 상호연관 헤더 이름 |
-| `mdc-key` | string | `"requestId"` | MDC 저장 키명 |
+> **민감 키 마스킹 팁**: `authorization`, `cookie`, `set-cookie`, `password`, `access-token`, `refresh-token`, `x-api-key` 등을 등록하는 것을 권장합니다.
 
 ---
 
-## 🪪 상호연관 ID(CorrelationId)
+## 동작 규칙
 
-- 요청 헤더에 `X-Request-Id`가 없으면 라이브러리가 자동으로 생성하여 **응답 헤더로도 반환**합니다.
-- MDC에 `requestId` 키로 넣기 때문에, 로거 패턴에 `%X{requestId}`를 넣으면 모든 로그 라인에 같이 표시할 수 있습니다.
-
-```yaml
-logging:
-  pattern:
-    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger - %msg %X{requestId}%n"
-```
-
----
-
-## 🧭 트러블슈팅
-
-- **로그가 안 찍힘**: 패키지 레벨을 확인하세요. (`com.chuseok22.logging.filter`, `com.chuseok22.logging.aspect`)
-- **바디가 비어있음**: `multipart/*` 또는 바이너리일 수 있습니다. 혹은 `log-request-body`/`log-response-body` 설정을 확인하세요.
-- **쿼리/폼이 안 예쁘게 보임**: `pretty-query-params`/`pretty-form-body`가 `true`인지 확인하세요.
-- **민감정보 노출**: `mask-sensitive`가 `true`인지, `sensitive-keys`에 키가 등록되었는지 확인하세요.
+- `@LogMonitoring`가 붙은 메서드에 한해서만 로깅합니다.
+- 웹 요청 컨텍스트가 있으면 **HTTP REQUEST** 섹션을 먼저 출력합니다.
+- 이후 **METHOD Args** 섹션을 출력합니다(`logParameters=true`일 때).
+- 정상 종료 시 **Result** 섹션을, 예외 시 **ERROR** 섹션(간략)을 출력합니다.
+- 모든 출력은 **한 번의 `INFO` 로그 호출**로 묶여 박스 형태로 기록됩니다.
+- 멀티파트 요청은 바디 내용을 실제로 읽지 않으며, `"[multipart] (files/parts omitted)"`로 표기합니다.
+- JSON/Form은 보기 좋게 포맷팅되어 출력되며, 길이가 너무 길면 `max-body-length` 기준으로 생략됩니다.
 
 ---
 
-## 🧱 제약/주의
+## 자주 묻는 질문 (FAQ)
 
-- Servlet 스택 전용입니다(WebFlux 미지원).
-- `ContentCaching*Wrapper` 특성상 **대용량 스트리밍** 응답은 성능에 영향을 줄 수 있습니다.
-- 바이너리/멀티파트 바디는 기본적으로 로깅하지 않습니다.
+**Q. 로그가 안 보여요.**  
+A. 다음을 확인하세요.
+1) `chuseok22.logging.enabled=true` 인지,
+2) `@LogMonitoring`를 메서드에 달았는지,
+3) `spring-boot-starter-aop`가 포함되어 있는지,
+4) 로깅 레벨/패턴이 정상인지.
+
+**Q. 예외 응답이 상세하게 안 나와요.**  
+A. AOP는 컨트롤러 **메서드 경계**를 감쌀 뿐, 글로벌 예외 처리기에서 최종 바디를 만들기 전에 제어가 종료될 수 있습니다. 라이브러리는 **가능한 범위**에서 예외 정보를 간단히 요약합니다. 더 자세한 바디를 원하면, 커스텀 예외에 `getPayload()`/`getBody()` 등의 접근자를 제공하는 방식을 권장합니다.
+
+**Q. 운영 환경에서 써도 되나요?**  
+A. 가능합니다. 다만 PII/토큰 등 민감정보 노출을 막기 위해 **마스킹 키 목록**을 충분히 구성하고, 필요 시 `log-request-body`/`log-response-body`를 비활성화하는 것을 권장합니다.
 
 ---
 
-## 📬 문의/기여
+## 릴리즈/버전
 
-- 민감키 규칙 강화, WebClient/Feign 아웃바운드 로깅, 헤더 화이트리스트/블랙리스트 옵션 등 확장을 원하면 이슈를 남겨주세요.
-- 내부 규칙에 맞춘 **사전/사후 마스킹** 훅 추가도 고려하고 있습니다.
+- 그룹: `com.chuseok22`
+- 아티팩트: `logging`
+- 버전: 예) `0.0.1`
+
+팀 Nexus 정책에 맞춰 SNAPSHOT/RELEASE를 구분해 사용하세요.
+
+---
+
+## 라이선스
+
+사내용/프로젝트 정책에 따릅니다.
