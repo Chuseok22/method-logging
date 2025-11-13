@@ -33,8 +33,8 @@ public class RequestResponseLoggingFilter extends OncePerRequestFilter {
   private final HttpLoggingProperties properties;
   private final PathMatcher pathMatcher = new AntPathMatcher();
 
-  private static final String HEADER_LINE = "================[HTTP 로깅 시작]================";
-  private static final String FOOTER_LINE = "==============================================";
+  private static final String HEADER_LINE = "==========================[HTTP 로깅 시작]==========================";
+  private static final String FOOTER_LINE = "=================================================================";
 
   @Override
   protected boolean shouldNotFilter(HttpServletRequest request) {
@@ -69,7 +69,7 @@ public class RequestResponseLoggingFilter extends OncePerRequestFilter {
 
       String logBody = buildHttpLogBody(cachingRequest, cachingResponse, duration);
 
-      log.info("\n{}\n{}\n{}", HEADER_LINE, logBody, FOOTER_LINE);
+      log.info("\n\n{}\n\n{}\n\n{}\n", HEADER_LINE, logBody, FOOTER_LINE);
       cachingResponse.copyBodyToResponse();
     }
   }

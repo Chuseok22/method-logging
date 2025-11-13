@@ -19,8 +19,8 @@ public class MethodExecutionLoggingAspect {
 
   private final HttpLoggingProperties properties;
 
-  private static final String HEADER_LINE = "================[메서드 로깅 시작]================";
-  private static final String FOOTER_LINE = "==============================================";
+  private static final String HEADER_LINE = "==========================[메서드 로깅 시작]==========================";
+  private static final String FOOTER_LINE = "==================================================================";
 
   @Around("@annotation(logMonitoring)")
   public Object logExecution(ProceedingJoinPoint joinPoint, LogMonitoring logMonitoring) throws Throwable {
@@ -32,7 +32,7 @@ public class MethodExecutionLoggingAspect {
 
     long startTime = System.currentTimeMillis();
 
-    log.info("\n{}\n", HEADER_LINE);
+    log.info("\n\n{}\n\n", HEADER_LINE);
 
     if (logMonitoring.logParameters()) {
       String argsPretty = PrettyJson.toJsonOrToStringMasked(joinPoint.getArgs(), 2, properties.isMaskSensitive(), properties.getSensitiveKeys(), properties.getMaskReplacement());
@@ -66,7 +66,7 @@ public class MethodExecutionLoggingAspect {
         log.error("x {}.{} Error ({} ms): {}", className, methodName, duration, throwable.getMessage(), throwable);
       }
 
-      log.info("\n{}", FOOTER_LINE);
+      log.info("\n\n{}\n", FOOTER_LINE);
     }
   }
 
