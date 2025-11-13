@@ -32,14 +32,19 @@ public class MethodExecutionLoggingAspect {
 
     long startTime = System.currentTimeMillis();
 
-    log.info("\n\n{}\n\n", HEADER_LINE);
+    StringBuilder builder = new StringBuilder();
+    builder.append("\n\n").append(HEADER_LINE).append("\n\n");
 
     if (logMonitoring.logParameters()) {
       String argsPretty = PrettyJson.toJsonOrToStringMasked(joinPoint.getArgs(), 2, properties.isMaskSensitive(), properties.getSensitiveKeys(), properties.getMaskReplacement());
-      log.info("[METHOD] [RequestId: {}]\n-> {}.{} Args:\n {}",
-        requestId, className, methodName, argsPretty.replace("\n", "\n  "));
+      builder.append("[METHOD] [RequestId: ").append(requestId).append("]\n")
+        .append("-> ").append(className).append(".").append(methodName).append(" Args:\n ")
+        .append(argsPretty.replace("\n", "\n  "))
+        .append("\n");
     } else {
-      log.info("[METHOD] [RequestId: {}]\n-> {}.{}", requestId, className, methodName);
+      builder.append("[METHOD] [RequestId: ").append(requestId).append("]\n")
+        .append("-> ").append(className).append(".").append(methodName)
+        .append("\n");
     }
 
     Object result = null;
@@ -58,15 +63,23 @@ public class MethodExecutionLoggingAspect {
         if (logMonitoring.logResult()) {
           String resultPretty = PrettyJson.toJsonOrToStringMasked(result, 2, properties.isMaskSensitive(), properties.getSensitiveKeys(), properties.getMaskReplacement());
           String truncated = LoggingUtil.truncate(resultPretty, 4000);
-          log.info("<- {}.{} Result ({} ms):\n {}", className, methodName, duration, truncated.replace("\n", "\n  "));
+          builder.append("<- ").append(className).append(".").append(methodName)
+            .append(" Result (").append(duration).append(" ms):\n ")
+            .append(truncated.replace("\n", "\n  "))
+            .append("\n");
         } else if (logMonitoring.logExecutionTime()) {
-          log.info("<- {}.{} ({} ms)", className, methodName, duration);
+          builder.append("<- ").append(className).append(".").append(methodName)
+            .append(" (").append(duration).append(" ms)")
+            .append("\n");
         }
       } else {
-        log.error("x {}.{} Error ({} ms): {}", className, methodName, duration, throwable.getMessage(), throwable);
+        builder.append("x ").append(className).append(".").append(methodName)
+          .append(" Error (").append(duration).append(" ms): ")
+          .append(throwable.getMessage())
+          .append("\n");
       }
-
-      log.info("\n\n{}\n", FOOTER_LINE);
+      builder.append("\n").append(FOOTER_LINE).append("\n");
+      log.info(builder.toString());
     }
   }
 
